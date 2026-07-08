@@ -220,3 +220,5 @@ __marimo__/
 # Raw data
 data_pipeline/news/historical/raw_data/
 data_pipeline/news/realtime/raw_data/
+*.csv
+*.parquet
