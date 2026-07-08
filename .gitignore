@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Raw data
+data_pipeline/news/historical/raw_data/
+data_pipeline/news/realtime/raw_data/
