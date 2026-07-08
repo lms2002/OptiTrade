@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  # 1. TimescaleDB (시계열 데이터 저장)
+  timescaledb:
+    image: timescale/timescaledb:latest-pg14
+    environment:
+      POSTGRES_USER: ${TIMESCALEDB_USER:-postgres}
+      POSTGRES_PASSWORD: ${TIMESCALEDB_PASSWORD:-postgres}
+      POSTGRES_DB: ${TIMESCALEDB_DB:-stock_db}
+    ports:
+      - "5433:5432" # 로컬 Postgres와의 충돌을 막기 위해 5433으로 포워딩
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+
+  # 2. PostgreSQL (메타데이터 및 Airflow 백엔드)
+  postgres:
+    image: postgres:14
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-airflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-airflow}
+      POSTGRES_DB: ${POSTGRES_DB:-airflow}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # 3. Redis (캐시 및 Celery 브로커)
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+
+  # 4. MLflow (실험 관리 및 모델 레지스트리)
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    ports:
+      - "5000:5000"
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlflow.db
+    volumes:
+      - mlflow_data:/mlruns
+
+  # 5. Airflow Scheduler
+  airflow-scheduler:
+    image: apache/airflow:2.7.1-python3.10
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow}@postgres:5432/${POSTGRES_DB:-airflow}
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow}@postgres:5432/${POSTGRES_DB:-airflow}
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+    command: scheduler
+    volumes:
+      - ./infra/airflow/dags:/opt/airflow/dags
+
+  # 6. Airflow Webserver
+  airflow-webserver:
+    image: apache/airflow:2.7.1-python3.10
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow}@postgres:5432/${POSTGRES_DB:-airflow}
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+    ports:
+      - "8080:8080"
+    command: webserver
+    volumes:
+      - ./infra/airflow/dags:/opt/airflow/dags
+
+  # 7. FastAPI 서비스 (개발용 볼륨 마운트)
+  api:
+    image: python:3.10-slim
+    working_dir: /app
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    command: bash -c "pip install fastapi uvicorn redis && uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload"
+
+volumes:
+  timescaledb_data:
+  postgres_data:
+  mlflow_data:
