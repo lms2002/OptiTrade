@@ -1,27 +1,25 @@
-version: '3.8'
-
 services:
   # 1. TimescaleDB (시계열 데이터 저장)
   timescaledb:
-    image: timescale/timescaledb:latest-pg14
+    image: timescale/timescaledb:latest-pg16
     environment:
       POSTGRES_USER: ${TIMESCALEDB_USER:-postgres}
       POSTGRES_PASSWORD: ${TIMESCALEDB_PASSWORD:-postgres}
       POSTGRES_DB: ${TIMESCALEDB_DB:-stock_db}
     ports:
-      - "5433:5432" # 로컬 Postgres와의 충돌을 막기 위해 5433으로 포워딩
+      - "5433:5432"
     volumes:
       - timescaledb_data:/var/lib/postgresql/data
 
   # 2. PostgreSQL (메타데이터 및 Airflow 백엔드)
   postgres:
-    image: postgres:14
+    image: postgres:16
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-airflow}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-airflow}
       POSTGRES_DB: ${POSTGRES_DB:-airflow}
     ports:
-      - "5432:5432"
+      - "5434:5432"   # 로컬 Postgres 16.14와 충돌 방지
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -42,7 +40,7 @@ services:
 
   # 5. Airflow Scheduler
   airflow-scheduler:
-    image: apache/airflow:2.7.1-python3.10
+    image: apache/airflow:3.1.0-python3.13
     depends_on:
       - postgres
       - redis
@@ -58,7 +56,7 @@ services:
 
   # 6. Airflow Webserver
   airflow-webserver:
-    image: apache/airflow:2.7.1-python3.10
+    image: apache/airflow:3.1.0-python3.13
     depends_on:
       - postgres
       - redis
@@ -72,9 +70,24 @@ services:
     volumes:
       - ./infra/airflow/dags:/opt/airflow/dags
 
-  # 7. FastAPI 서비스 (개발용 볼륨 마운트)
+  # 7. Airflow Worker (CeleryExecutor 필수 — 기존에 누락됨)
+  airflow-worker:
+    image: apache/airflow:3.1.0-python3.13
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow}@postgres:5432/${POSTGRES_DB:-airflow}
+      - AIRFLOW__CELERY__BROKER_URL=redis://redis:6379/0
+      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow}@postgres:5432/${POSTGRES_DB:-airflow}
+    command: celery worker
+    volumes:
+      - ./infra/airflow/dags:/opt/airflow/dags
+
+  # 8. FastAPI 서비스 (개발용 볼륨 마운트)
   api:
-    image: python:3.10-slim
+    image: python:3.13-slim
     working_dir: /app
     volumes:
       - .:/app
